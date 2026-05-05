@@ -1,0 +1,780 @@
+openapi: 3.1.0
+info:
+  title: 학식 연동 AI 영양분석 앱 API
+  version: 0.2.0
+  description: |
+    UX 흐름 기준으로 정리한 API 명세입니다.
+
+    앱의 핵심 흐름은 다음과 같습니다.
+    1. 오늘 또는 특정 날짜의 여러 식당 학식 메뉴 조회
+    2. 메뉴 상세 및 AI 영양분석 결과 조회
+    3. 사용자가 선택한 메뉴들의 영양소 합산 및 1일 권장량 비교
+    4. Google Apps Script 크롤러가 수집한 메뉴 데이터 입력
+
+servers:
+  - url: http://localhost:8080/api
+    description: Local development server
+
+tags:
+  - name: Menus
+    description: 학식 메뉴 조회
+  - name: Analysis
+    description: AI 영양분석
+  - name: NutritionSummary
+    description: 선택 메뉴 영양소 합산
+  - name: Crawler
+    description: 크롤러 데이터 입력
+
+paths:
+  /menus:
+    get:
+      tags:
+        - Menus
+      summary: 날짜별 학식 메뉴 조회
+      description: |
+        특정 날짜의 학식 메뉴를 식당별로 묶어서 조회합니다.
+        앱의 오늘의 학식 화면에서 사용합니다.
+      operationId: getMenusByDate
+      parameters:
+        - name: date
+          in: query
+          required: true
+          description: 조회할 날짜
+          schema:
+            type: string
+            format: date
+          example: '2026-05-05'
+      responses:
+        '200':
+          description: 메뉴 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MenuListResponse'
+              examples:
+                success:
+                  value:
+                    date: '2026-05-05'
+                    cafeteriaGroups:
+                      - cafeteria:
+                          id: 1
+                          name: 학생식당
+                        menus:
+                          - id: 101
+                            date: '2026-05-05'
+                            cafeteriaId: 1
+                            mealType: lunch
+                            title: 중식 A코스
+                            rawMenuText: 쌀밥, 제육볶음, 된장국, 김치
+                            analysisStatus: completed
+                          - id: 102
+                            date: '2026-05-05'
+                            cafeteriaId: 1
+                            mealType: lunch
+                            title: 중식 B코스
+                            rawMenuText: 카레라이스, 돈까스, 샐러드
+                            analysisStatus: pending
+                      - cafeteria:
+                          id: 2
+                          name: 기숙사식당
+                        menus:
+                          - id: 201
+                            date: '2026-05-05'
+                            cafeteriaId: 2
+                            mealType: dinner
+                            title: 석식
+                            rawMenuText: 잡곡밥, 닭갈비, 미역국, 깍두기
+                            analysisStatus: completed
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /menus/{menuId}:
+    get:
+      tags:
+        - Menus
+      summary: 메뉴 상세 조회
+      description: |
+        특정 메뉴의 상세 정보와 AI 영양분석 결과를 조회합니다.
+        메뉴 상세 화면에서 사용합니다.
+      operationId: getMenuDetail
+      parameters:
+        - name: menuId
+          in: path
+          required: true
+          description: 메뉴 ID
+          schema:
+            type: integer
+          example: 101
+      responses:
+        '200':
+          description: 메뉴 상세 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MenuDetailResponse'
+              examples:
+                completed:
+                  value:
+                    id: 101
+                    date: '2026-05-05'
+                    cafeteria:
+                      id: 1
+                      name: 학생식당
+                    mealType: lunch
+                    title: 중식 A코스
+                    rawMenuText: 쌀밥, 제육볶음, 된장국, 김치
+                    analysisStatus: completed
+                    analysis:
+                      nutrition:
+                        caloriesKcal: 850
+                        carbohydrateG: 105
+                        proteinG: 34
+                        fatG: 30
+                        sodiumMg: 1600
+                      comment: 단백질은 충분한 편이나 나트륨이 다소 높을 수 있습니다.
+                pending:
+                  value:
+                    id: 102
+                    date: '2026-05-05'
+                    cafeteria:
+                      id: 1
+                      name: 학생식당
+                    mealType: lunch
+                    title: 중식 B코스
+                    rawMenuText: 카레라이스, 돈까스, 샐러드
+                    analysisStatus: pending
+                    analysis: null
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /menus/{menuId}/analysis:
+    post:
+      tags:
+        - Analysis
+      summary: 메뉴 AI 영양분석 실행
+      description: |
+        특정 메뉴의 AI 영양분석을 실행합니다.
+        이미 분석 결과가 있으면 새로 분석하지 않고 기존 결과를 반환합니다.
+      operationId: analyzeMenu
+      parameters:
+        - name: menuId
+          in: path
+          required: true
+          description: 메뉴 ID
+          schema:
+            type: integer
+          example: 101
+      responses:
+        '200':
+          description: 기존 분석 결과 반환
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MenuAnalysisResponse'
+        '201':
+          description: 새 분석 결과 생성 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MenuAnalysisResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          description: AI 분석 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: AI_ANALYSIS_FAILED
+                message: AI 영양분석에 실패했습니다.
+
+  /nutrition-summary:
+    post:
+      tags:
+        - NutritionSummary
+      summary: 선택 메뉴 영양소 합산
+      description: |
+        사용자가 선택한 메뉴들의 영양정보를 합산하고,
+        1일 권장량과 비교한 결과를 반환합니다.
+        선택한 메뉴 요약 화면에서 사용합니다.
+      operationId: createNutritionSummary
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NutritionSummaryRequest'
+            examples:
+              default:
+                value:
+                  date: '2026-05-05'
+                  menuIds:
+                    - 101
+                    - 201
+      responses:
+        '200':
+          description: 영양소 합산 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NutritionSummaryResponse'
+              examples:
+                success:
+                  value:
+                    date: '2026-05-05'
+                    selectedMenus:
+                      - id: 101
+                        cafeteriaName: 학생식당
+                        mealType: lunch
+                        title: 중식 A코스
+                      - id: 201
+                        cafeteriaName: 기숙사식당
+                        mealType: dinner
+                        title: 석식
+                    totalNutrition:
+                      caloriesKcal: 1540
+                      carbohydrateG: 210
+                      proteinG: 66
+                      fatG: 48
+                      sodiumMg: 3200
+                    dailyReference:
+                      caloriesKcal: 2000
+                      carbohydrateG: 324
+                      proteinG: 55
+                      fatG: 54
+                      sodiumMg: 2000
+                    comparisons:
+                      caloriesKcal:
+                        value: 1540
+                        reference: 2000
+                        ratio: 0.77
+                        status: normal
+                      carbohydrateG:
+                        value: 210
+                        reference: 324
+                        ratio: 0.65
+                        status: low
+                      proteinG:
+                        value: 66
+                        reference: 55
+                        ratio: 1.2
+                        status: high
+                      fatG:
+                        value: 48
+                        reference: 54
+                        ratio: 0.89
+                        status: normal
+                      sodiumMg:
+                        value: 3200
+                        reference: 2000
+                        ratio: 1.6
+                        status: high
+                    comment: 선택한 메뉴 기준 단백질은 충분하지만 나트륨 섭취량이 높은 편입니다.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: 선택한 메뉴 중 AI 분석이 완료되지 않은 메뉴가 있음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: MENU_ANALYSIS_REQUIRED
+                message: 선택한 메뉴 중 AI 영양분석이 완료되지 않은 메뉴가 있습니다.
+
+  /crawler/menus:
+    post:
+      tags:
+        - Crawler
+      summary: 크롤러 메뉴 데이터 입력
+      description: |
+        Google Apps Script 크롤러가 수집한 학식 메뉴를 백엔드에 입력합니다.
+        같은 날짜, 식당, 식사 구분, 제목의 메뉴가 이미 있으면 갱신할 수 있습니다.
+      operationId: ingestMenusFromCrawler
+      security:
+        - CrawlerApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CrawlerMenuIngestionRequest'
+            examples:
+              default:
+                value:
+                  source: google-apps-script
+                  crawledAt: '2026-05-05T00:10:00Z'
+                  menus:
+                    - cafeteriaName: 학생식당
+                      date: '2026-05-05'
+                      mealType: lunch
+                      title: 중식 A코스
+                      rawMenuText: 쌀밥, 제육볶음, 된장국, 김치
+                    - cafeteriaName: 기숙사식당
+                      date: '2026-05-05'
+                      mealType: dinner
+                      title: 석식
+                      rawMenuText: 잡곡밥, 닭갈비, 미역국, 깍두기
+      responses:
+        '200':
+          description: 메뉴 입력 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CrawlerMenuIngestionResponse'
+              example:
+                createdCount: 2
+                updatedCount: 0
+                skippedCount: 0
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    CrawlerApiKey:
+      type: apiKey
+      in: header
+      name: X-Crawler-Api-Key
+
+  responses:
+    BadRequest:
+      description: 잘못된 요청
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: BAD_REQUEST
+            message: 요청 형식이 올바르지 않습니다.
+
+    Unauthorized:
+      description: 인증 실패
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: UNAUTHORIZED
+            message: 인증 정보가 올바르지 않습니다.
+
+    NotFound:
+      description: 데이터를 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: NOT_FOUND
+            message: 요청한 데이터를 찾을 수 없습니다.
+
+  schemas:
+    MealType:
+      type: string
+      description: 식사 구분
+      enum:
+        - breakfast
+        - lunch
+        - dinner
+        - other
+      example: lunch
+
+    AnalysisStatus:
+      type: string
+      description: AI 영양분석 상태
+      enum:
+        - pending
+        - completed
+        - failed
+      example: completed
+
+    ComparisonStatus:
+      type: string
+      description: 1일 권장량 대비 상태
+      enum:
+        - low
+        - normal
+        - high
+      example: normal
+
+    Cafeteria:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: integer
+          description: 식당 ID
+          example: 1
+        name:
+          type: string
+          description: 식당 이름
+          example: 학생식당
+
+    MenuSummary:
+      type: object
+      required:
+        - id
+        - date
+        - cafeteriaId
+        - mealType
+        - title
+        - rawMenuText
+        - analysisStatus
+      properties:
+        id:
+          type: integer
+          description: 메뉴 ID
+          example: 101
+        date:
+          type: string
+          format: date
+          description: 메뉴 제공 날짜
+          example: '2026-05-05'
+        cafeteriaId:
+          type: integer
+          description: 식당 ID
+          example: 1
+        mealType:
+          $ref: '#/components/schemas/MealType'
+        title:
+          type: string
+          description: 메뉴 제목 또는 코스명
+          example: 중식 A코스
+        rawMenuText:
+          type: string
+          description: 원본 메뉴 문자열
+          example: 쌀밥, 제육볶음, 된장국, 김치
+        analysisStatus:
+          $ref: '#/components/schemas/AnalysisStatus'
+
+    CafeteriaMenuGroup:
+      type: object
+      required:
+        - cafeteria
+        - menus
+      properties:
+        cafeteria:
+          $ref: '#/components/schemas/Cafeteria'
+        menus:
+          type: array
+          items:
+            $ref: '#/components/schemas/MenuSummary'
+
+    MenuListResponse:
+      type: object
+      required:
+        - date
+        - cafeteriaGroups
+      properties:
+        date:
+          type: string
+          format: date
+          example: '2026-05-05'
+        cafeteriaGroups:
+          type: array
+          description: 식당별 메뉴 그룹
+          items:
+            $ref: '#/components/schemas/CafeteriaMenuGroup'
+
+    NutritionFacts:
+      type: object
+      required:
+        - caloriesKcal
+        - carbohydrateG
+        - proteinG
+        - fatG
+        - sodiumMg
+      properties:
+        caloriesKcal:
+          type: number
+          description: 열량, kcal 단위
+          example: 850
+        carbohydrateG:
+          type: number
+          description: 탄수화물, g 단위
+          example: 105
+        proteinG:
+          type: number
+          description: 단백질, g 단위
+          example: 34
+        fatG:
+          type: number
+          description: 지방, g 단위
+          example: 30
+        sodiumMg:
+          type: number
+          description: 나트륨, mg 단위
+          example: 1600
+
+    MenuAnalysis:
+      type: object
+      required:
+        - nutrition
+        - comment
+      properties:
+        nutrition:
+          $ref: '#/components/schemas/NutritionFacts'
+        comment:
+          type: string
+          description: AI가 생성한 간단한 식단 코멘트
+          example: 단백질은 충분한 편이나 나트륨이 다소 높을 수 있습니다.
+
+    MenuDetailResponse:
+      type: object
+      required:
+        - id
+        - date
+        - cafeteria
+        - mealType
+        - title
+        - rawMenuText
+        - analysisStatus
+        - analysis
+      properties:
+        id:
+          type: integer
+          example: 101
+        date:
+          type: string
+          format: date
+          example: '2026-05-05'
+        cafeteria:
+          $ref: '#/components/schemas/Cafeteria'
+        mealType:
+          $ref: '#/components/schemas/MealType'
+        title:
+          type: string
+          example: 중식 A코스
+        rawMenuText:
+          type: string
+          example: 쌀밥, 제육볶음, 된장국, 김치
+        analysisStatus:
+          $ref: '#/components/schemas/AnalysisStatus'
+        analysis:
+          oneOf:
+            - $ref: '#/components/schemas/MenuAnalysis'
+            - type: 'null'
+
+    MenuAnalysisResponse:
+      type: object
+      required:
+        - menuId
+        - analysisStatus
+        - analysis
+      properties:
+        menuId:
+          type: integer
+          example: 101
+        analysisStatus:
+          $ref: '#/components/schemas/AnalysisStatus'
+        analysis:
+          $ref: '#/components/schemas/MenuAnalysis'
+
+    NutritionSummaryRequest:
+      type: object
+      required:
+        - date
+        - menuIds
+      properties:
+        date:
+          type: string
+          format: date
+          description: 선택 메뉴 기준 날짜
+          example: '2026-05-05'
+        menuIds:
+          type: array
+          minItems: 1
+          description: 사용자가 선택한 메뉴 ID 목록
+          items:
+            type: integer
+          example:
+            - 101
+            - 201
+
+    SelectedMenu:
+      type: object
+      required:
+        - id
+        - cafeteriaName
+        - mealType
+        - title
+      properties:
+        id:
+          type: integer
+          example: 101
+        cafeteriaName:
+          type: string
+          example: 학생식당
+        mealType:
+          $ref: '#/components/schemas/MealType'
+        title:
+          type: string
+          example: 중식 A코스
+
+    NutrientComparison:
+      type: object
+      required:
+        - value
+        - reference
+        - ratio
+        - status
+      properties:
+        value:
+          type: number
+          description: 합산 영양소 값
+          example: 1540
+        reference:
+          type: number
+          description: 1일 권장량 기준값
+          example: 2000
+        ratio:
+          type: number
+          description: 권장량 대비 비율. 1.0은 100%를 의미합니다.
+          example: 0.77
+        status:
+          $ref: '#/components/schemas/ComparisonStatus'
+
+    NutritionComparisons:
+      type: object
+      required:
+        - caloriesKcal
+        - carbohydrateG
+        - proteinG
+        - fatG
+        - sodiumMg
+      properties:
+        caloriesKcal:
+          $ref: '#/components/schemas/NutrientComparison'
+        carbohydrateG:
+          $ref: '#/components/schemas/NutrientComparison'
+        proteinG:
+          $ref: '#/components/schemas/NutrientComparison'
+        fatG:
+          $ref: '#/components/schemas/NutrientComparison'
+        sodiumMg:
+          $ref: '#/components/schemas/NutrientComparison'
+
+    NutritionSummaryResponse:
+      type: object
+      required:
+        - date
+        - selectedMenus
+        - totalNutrition
+        - dailyReference
+        - comparisons
+        - comment
+      properties:
+        date:
+          type: string
+          format: date
+          example: '2026-05-05'
+        selectedMenus:
+          type: array
+          items:
+            $ref: '#/components/schemas/SelectedMenu'
+        totalNutrition:
+          $ref: '#/components/schemas/NutritionFacts'
+        dailyReference:
+          $ref: '#/components/schemas/NutritionFacts'
+        comparisons:
+          $ref: '#/components/schemas/NutritionComparisons'
+        comment:
+          type: string
+          description: 선택한 메뉴들의 종합 코멘트
+          example: 선택한 메뉴 기준 단백질은 충분하지만 나트륨 섭취량이 높은 편입니다.
+
+    CrawlerMenuIngestionRequest:
+      type: object
+      required:
+        - source
+        - crawledAt
+        - menus
+      properties:
+        source:
+          type: string
+          description: 수집 출처
+          example: google-apps-script
+        crawledAt:
+          type: string
+          format: date-time
+          description: 크롤링 시각
+          example: '2026-05-05T00:10:00Z'
+        menus:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CrawlerMenuItem'
+
+    CrawlerMenuItem:
+      type: object
+      required:
+        - cafeteriaName
+        - date
+        - mealType
+        - title
+        - rawMenuText
+      properties:
+        cafeteriaName:
+          type: string
+          description: 식당 이름
+          example: 학생식당
+        date:
+          type: string
+          format: date
+          description: 메뉴 제공 날짜
+          example: '2026-05-05'
+        mealType:
+          $ref: '#/components/schemas/MealType'
+        title:
+          type: string
+          description: 메뉴 제목 또는 코스명
+          example: 중식 A코스
+        rawMenuText:
+          type: string
+          description: 원본 메뉴 문자열
+          example: 쌀밥, 제육볶음, 된장국, 김치
+
+    CrawlerMenuIngestionResponse:
+      type: object
+      required:
+        - createdCount
+        - updatedCount
+        - skippedCount
+      properties:
+        createdCount:
+          type: integer
+          description: 새로 생성된 메뉴 수
+          example: 2
+        updatedCount:
+          type: integer
+          description: 갱신된 메뉴 수
+          example: 0
+        skippedCount:
+          type: integer
+          description: 처리하지 않은 메뉴 수
+          example: 0
+
+    ErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: 에러 코드
+          example: BAD_REQUEST
+        message:
+          type: string
+          description: 에러 메시지
+          example: 요청 형식이 올바르지 않습니다.
+        details:
+          type:
+            - object
+            - 'null'
+          additionalProperties: true
+          description: 추가 에러 정보
