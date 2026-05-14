@@ -151,6 +151,10 @@ function parseHufsMenuHtml(html, cafeteriaName) {
         return;
       }
 
+      if (isOperationalNoticeOnly(rawMenuText)) {
+        return;
+      }
+
       menus.push({
         cafeteriaName: cafeteriaName,
         date: date,
@@ -194,7 +198,39 @@ function getMealType(title) {
     return 'dinner';
   }
 
+  const startHour = extractStartHour(title);
+  if (startHour !== null) {
+    if (startHour >= 5 && startHour < 10) {
+      return 'breakfast';
+    }
+
+    if (startHour >= 10 && startHour < 16) {
+      return 'lunch';
+    }
+
+    if (startHour >= 16 && startHour < 22) {
+      return 'dinner';
+    }
+  }
+
   return 'other';
+}
+
+function extractStartHour(title) {
+  const match = /\((\d{1,2}):\d{2}\s*~/.exec(title);
+  return match ? Number(match[1]) : null;
+}
+
+function isOperationalNoticeOnly(rawMenuText) {
+  const compactText = String(rawMenuText || '').replace(/\s+/g, '');
+
+  return (
+    compactText === '이전운영' ||
+    compactText === '운영없음' ||
+    compactText === '미운영' ||
+    compactText === '휴무' ||
+    /^이전운영\(.+\)$/.test(compactText)
+  );
 }
 
 function getKstWeekRange(date) {
@@ -275,9 +311,11 @@ function matchAll(text, regex) {
 }
 
 function stripTags(html) {
-  return decodeHtmlEntities(html)
-    .replace(/<br\s*\/?>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ');
+  return decodeHtmlEntities(
+    String(html || '')
+      .replace(/<br\s*\/?>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+  );
 }
 
 function decodeHtmlEntities(text) {
